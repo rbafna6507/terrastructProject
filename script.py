@@ -30,7 +30,9 @@ def inflate(mxfileName: str):
     return ET.fromstring(unquote(zlib.decompress(mxfile,-15).decode('utf8')))
 
 
-def define_type_snapPoint(object, style_info):
+def define_id_type_snapPoint(object, style_info):
+    object["id"] = str(uuid.uuid4())
+
     if re.search(r'shape=(.*?);', style_info):
         shape = re.search(r'shape=(.*?);', style_info).group(1)
         if shape in supported_shapes:
@@ -42,23 +44,27 @@ def define_type_snapPoint(object, style_info):
 
     object['snapPointIds'] = []
 
-# have another argument for whether to put it into a label attribute *if 'text' in style_info: say that attribute is true, then return the correct baseTransformations
+# with more time, this function would be more useful with another argument
+# to indicate whether it is for Text or for a Label
+# That implementation would allow for cleaner outputs and
+# less messy if conditions.
+
 def define_type_text(object, style_info, shapeInfo, primitiveInfo):
-    if primitiveInfo.get('value') != '':
+    if primitiveInfo.get('value') != '' and primitiveInfo.get('value') is not None:
         object = {"id": str(uuid.uuid4()), "type": "Text", "snapPointIDs": [], "abstractAttributes": {"isPortal": True}}
         text_value = primitiveInfo.get('value')
 
         # Simply check if the bold, itallic, and underline tags are present and correspondingly set True or False those attributes
 
-        if re.search(r'<b>', text_value):
+        if '<b>' in text_value:
             object['abstractAttributes']['isBold'] = True
         else:
             object['abstractAttributes']['isBold'] = False
-        if re.search(r'<i>', text_value):
+        if '<i>' in text_value:
             object['abstractAttributes']['isItalic'] = True
         else:
             object['abstractAttributes']['isItalic'] = False
-        if re.search(r'<u>', text_value):
+        if '<u>' in text_value:
             object['abstractAttributes']['isUnderline'] = True
         else:
             object['abstractAttributes']['isUnderline'] = False
@@ -85,7 +91,7 @@ def define_type_text(object, style_info, shapeInfo, primitiveInfo):
 
         if re.search(r'fontColor=(.*?);', style_info):
             font_color = re.search(r'fontColor=(.*?);', style_info).group(1)
-            object['primitiveAttributes']['color'] = font_color
+            object['primitiveAttributes']['color'] = font_color.lower()
         else:
             object['primitiveAttributes']['color'] = "#000000"
 
@@ -99,6 +105,66 @@ def define_type_text(object, style_info, shapeInfo, primitiveInfo):
         object['primitiveAttributes']['width'] = int(shapeInfo.get('width')) - 10
         object['primitiveAttributes']['height'] = int(shapeInfo.get('height')) - 10
     return object
+
+def define_abstract_attributes(object, style_info):
+    object["abstractAttributes"] = {"isPortal": True}
+    if re.search(r'dashed=(.*?);', style_info):
+        if re.search(r'dashed=(.*?);', style_info).group(1) == "0":
+            object["abstractAttributes"]["dashGapSize"] = 0
+        else:
+            object["abstractAttributes"]["dashGapSize"] = 10
+    else:
+        object["abstractAttributes"]["dashGapSize"] = 0
+
+    if object['type'] == "Square" and re.search(r'shape=(.*?);', style_info):
+        if re.search(r'shape=(.*?);', style_info).group(1) == "cube":
+            object['abstractAttributes']['3d'] = True
+
+    if re.search(r'shadow=(.*?);', style_info):
+        if re.search(r'shadow=(.*?);', style_info).group(1) == "1":
+            object['abstractAttributes']['dropShadow'] = True
+
+
+def define_primitive_attributes(object, style_info, shapeInfo):
+    if re.search(r'rounded=(.*?);', style_info) and object['type'] == "Square":
+        if re.search(r'rounded=(.*?);', style_info).group(1) != "0":
+            object["primitiveAttributes"]["rx"] = 10
+            object["primitiveAttributes"]["ry"] = 10
+
+    if re.search(r'fillColor=(.*?);', style_info):
+        fill_color = re.search(r'fillColor=(.*?);', style_info).group(1)
+        if fill_color == 'none':
+            object["primitiveAttributes"]["fill"] = "transparent"
+        else:
+            object["primitiveAttributes"]["fill"] =fill_color.lower()
+    else:
+        object["primitiveAttributes"]["fill"] = "#FFFFFF"
+
+    object["primitiveAttributes"]["width"] = int(shapeInfo.get('width'))
+    object["primitiveAttributes"]["height"] = int(shapeInfo.get('height'))
+
+    if re.search(r'strokeColor=(.*?);', style_info):
+        if re.search(r'strokeColor=(.*?);', style_info).group(1) == 'none':
+            object["primitiveAttributes"]["stroke"] = "transparent"
+        else:
+            object["primitiveAttributes"]["stroke"] =re.search(r'strokeColor=(.*?);', style_info).group(1).lower()
+    else:
+        object["primitiveAttributes"]["stroke"] = "#000000"
+
+    if re.search(r'strokeWidth=(.*?);', style_info):
+        object["primitiveAttributes"]["stroke-width"] =int(re.search(r'strokeWidth=(.*?);', style_info).group(1))
+    else:
+        object["primitiveAttributes"]["stroke-width"] = 1
+
+    if re.search(r'opacity=(.*?);', style_info) and 'labelAttributes' in object:
+        object['labelAttributes']['primitiveAttributes']['opacity'] = int(int(re.search(r'opacity=(.*?);', style_info).group(1)) / 100)
+        object['primitiveAttributes']['opacity'] = int(int(re.search(r'opacity=(.*?);', style_info).group(1)) / 100)
+    elif re.search(r'opacity=(.*?);', style_info):
+        object['primitiveAttributes']['opacity'] = int(int(re.search(r'opacity=(.*?);', style_info).group(1)) / 100)
+    elif 'labelAttributes' in object:
+        object['labelAttributes']['primitiveAttributes']['opacity'] = 1
+    else:
+        object['primitiveAttributes']['opacity'] = 1
 
 
 
@@ -130,99 +196,44 @@ def make_json(mxGraphParent):
                 object = define_type_text(object, style_info, shapeInfo, primitiveInfo)
 
                 if "text" in style_info:
+                    object['primitiveAttributes']['width'] = object['primitiveAttributes']['width'] + 10
+                    object['primitiveAttributes']['height'] = object['primitiveAttributes']['height'] + 10
                     if re.search(r'textOpacity=(.*?);', style_info):
                         object['primitiveAttributes']['opacity'] =int(int(re.search(r'textOpacity=(.*?);', style_info).group(1)))/100
-                        json_data['boardObjects'].append(object)
-                        break
                     else:
                         object['primitiveAttributes']['opacity'] = 1
-                        json_data['boardObjects'].append(object)
-                        break
+                    json_data['boardObjects'].append(object)
+                    break
                 else:
-                    object = {'labelAttributes': object}
+                    if len(object) != 0:
+                        object = {'labelAttributes': object}
 
-                object["id"] = str(uuid.uuid4())
-                define_type_snapPoint(object, style_info)
+                define_id_type_snapPoint(object, style_info)
 
-                if object['type'] == "Cylinder":
-                    object['labelAttributes']['baseTransformations']= {"x": 5, "y": 53}
-                else:
-                    object['labelAttributes']['baseTransformations']= {"x": 5, "y":5}
+                if object['type'] == "Cylinder" and 'labelAttributes' in object:
+                    object['labelAttributes']["baseTransformations"]= {"x":5,"y":53}
+                    object['labelAttributes']['primitiveAttributes']['width'] = object['labelAttributes']['primitiveAttributes']['width'] + 20
+                    object['labelAttributes']['primitiveAttributes']['height'] = object['labelAttributes']['primitiveAttributes']['height'] + 20
+                elif 'labelAttributes' in object:
+                    object['labelAttributes']["baseTransformations"] = {"x":5,"y":5}
 
-                object["abstractAttributes"] = {"isPortal": True}
-                if re.search(r'dashed=(.*?);', style_info):
-                    if re.search(r'dashed=(.*?);', style_info).group(1) == "0":
-                        object["abstractAttributes"]["dashGapSize"] = 0
-                    else:
-                        object["abstractAttributes"]["dashGapSize"] = 5
-                else:
-                    object["abstractAttributes"]["dashGapSize"] = 0
-
-                if object['type'] == "Square":
-                    if re.search(r'shape=(.*?);', style_info):
-                        if re.search(r'shape=(.*?);', style_info).group(1) == "cube":
-                            object['abstractAttributes']['3d'] = True
-                        else:
-                            object['abstractAttributes']['3d'] = False
-                    else:
-                        object['abstractAttributes']['3d'] = False
+                define_abstract_attributes(object, style_info)
 
                 object["baseTransformations"] = {}
                 object["baseTransformations"]["x"] = int(shapeInfo.get('x'))
                 object["baseTransformations"]["y"] = int(shapeInfo.get('y'))
 
                 object["primitiveAttributes"] = {}
-                if re.search(r'rounded=(.*?);', style_info):
-                    if re.search(r'rounded=(.*?);', style_info).group(1) != "0":
-                        object["primitiveAttributes"]["rx"] = 10
-                        object["primitiveAttributes"]["ry"] = 10
-                    else:
-                        object["primitiveAttributes"]["rx"] = 0
-                        object["primitiveAttributes"]["ry"] = 0
+                define_primitive_attributes(object, style_info, shapeInfo)
 
-                if re.search(r'fillColor=(.*?);', style_info):
-                    fill_color = re.search(r'fillColor=(.*?);', style_info).group(1)
-                    if fill_color == 'none':
-                        object["primitiveAttributes"]["fill"] = "#FFFFFF"
-                    else:
-                        object["primitiveAttributes"]["fill"] =re.search(r'fillColor=(.*?);', style_info).group(1)
-                else:
-                    object["primitiveAttributes"]["fill"] = "#FFFFFF"
-
-                object["primitiveAttributes"]["width"] = int(shapeInfo.get('width'))
-                object["primitiveAttributes"]["height"] = int(shapeInfo.get('height'))
-
-                if re.search(r'strokeColor=(.*?);', style_info):
-                    if re.search(r'strokeColor=(.*?);', style_info).group(1) == 'none':
-                        object["primitiveAttributes"]["stroke"] = "#000000"
-                    else:
-                        object["primitiveAttributes"]["stroke"] =re.search(r'strokeColor=(.*?);', style_info).group(1)
-                else:
-                    object["primitiveAttributes"]["stroke"] = "#000000"
-
-                if re.search(r'strokeWidth=(.*?);', style_info):
-                    object["primitiveAttributes"]["stroke-width"] =int(re.search(r'strokeWidth=(.*?);', style_info).group(1))
-                else:
-                    object["primitiveAttributes"]["stroke-width"] = 1
-
-                    #label attributes were here
-
-                if re.search(r'opacity=(.*?);', style_info):
-                    object['labelAttributes']['primitiveAttributes']['opacity'] = 1
-                    object['primitiveAttributes']['opacity'] = int(re.search(r'opacity=(.*?);', style_info).group(1)) / 100
-
-                if re.search(r'shadow=(.*?);', style_info):
-                    if re.search(r'shadow=(.*?);', style_info).group(1) == "1":
-                        object['abstractAttributes']['dropShadow'] = True
-
-            json_data['boardObjects'].append(object)
+                json_data['boardObjects'].append(object)
 
     return json.dumps(json_data, indent=4)
 
 
-mxGraphParent = (inflate("testFiles/diagram1.xml"))
+mxGraphParent = (inflate("testFiles/diagram1arrow.xml"))
 print(make_json(mxGraphParent))
 
 # for value in make_json(mxGraphParent)['boardObjects']:
 #     print(value)
-#     print()
+#     print()Z
