@@ -230,8 +230,8 @@ def make_json(mxGraphParent):
 
     return json.dumps(json_data, indent=4)
 
-
-mxGraphParent = (inflate("testFiles/diagram1arrow.xml"))
+#
+mxGraphParent = (inflate("testFiles/textonly.xml"))
 print(make_json(mxGraphParent))
 
 # for value in make_json(mxGraphParent)['boardObjects']:
